@@ -15,6 +15,8 @@ test('viewer settings survive storage and reject malformed preferences', async (
   assert.equal(startupFolder(normalizeSettings(custom), 'creature/'), 'sound/music/');
   assert.equal(startupFolder(defaultSettings, 'creature/wolf/'), 'creature/wolf/');
   assert.equal(startupFolder(defaultSettings, undefined), 'creature/');
+  assert.equal(startupFolder(defaultSettings, ''), '');
+  assert.equal(startupFolder(normalizeSettings({startupFolder: ''}), 'creature/'), '');
   assert.equal(normalizeSettings({skinInterval: -1}).skinInterval, 1);
   assert.equal(normalizeSettings({skinInterval: 999}).skinInterval, 60);
   for (const folder of ['../sound/', 'sound/../../', 'sound//music/', 'sound/music.mp3']) assert.equal(normalizeSettings({startupFolder: folder}).startupFolder, 'last');

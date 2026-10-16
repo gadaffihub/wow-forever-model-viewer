@@ -85,6 +85,7 @@ The viewer then converts Ogg to WAV locally in memory. It looks for `ffmpeg` on 
 
 ## Browse
 
+- **All** searches every model folder. Check **incl. sounds** beside it to also search the sound library; the choice is remembered between launches. Expand **Folders** to browse the archive roots.
 - **creature/**, **character/**, **item/** and **models/** select actual archive path prefixes. **misc** selects other roots such as **world/**, **spells/** and **sound/**. Expand **Subfolders** only when you want to narrow the list.
 - **sound/** lists the installed Ogg, MP3 and WAV files with known paths. Click a row to play it. Search matches filenames, paths and file IDs. Folder, name, file ID and size sorting work across the continuous list; subfolders can narrow it to music, creatures or other audio groups. The player has play/pause, a seek bar and volume.
 - Model lists offer folder, name, file ID, skin count and size sorting. Click a sort button again to reverse it.
@@ -99,7 +100,7 @@ The gear at the top-right opens saved viewer defaults:
 - **Autoplay animations:** start the selected animation when a model opens. Off by default.
 - **Autoplay sounds:** play the selected sound when opening it or navigating the sound list. On by default; turn it off to select files silently and use the player manually. Some browsers require an initial press of Play before allowing audio.
 - **Cycle skins automatically:** step through the current model's skins, with an adjustable interval of 1–60 seconds. Off by default. Manual skin selection restarts the interval; cycling stops while the page is hidden or when you leave the model.
-- **Startup folder:** reopen the last folder, choose a top-level archive folder, or use **Use current folder** to save a subfolder. This takes effect on the next launch.
+- **Startup folder:** reopen the last folder, choose **All** or a top-level archive folder, or use **Use current folder** to save a subfolder. This takes effect on the next launch.
 - **WoW installation:** choose the local game directory with the macOS folder picker or save a manual path in the browser.
 
 Playback and startup-folder preferences save automatically in local browser storage, separately from the installation path. They persist across launches in the same app or browser profile. The macOS app and a separate browser have their own viewer preferences.

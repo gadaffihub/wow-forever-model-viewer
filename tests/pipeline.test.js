@@ -37,6 +37,21 @@ test('folder navigation keeps primary roots and misc roots separate from descend
  assert.deepEqual(selectModels(models,{folder:'creature/'}).map(m=>m.id),[1]);assert.deepEqual(selectModels(models,{folder:'models/'}).map(m=>m.id),[4]);
  assert.equal(referenceLabel('item/objectcomponents/weapon/'),'item');assert.equal(referenceLabel('character/human/'),'character');assert.equal(referenceLabel('models/creature/'),'known');
 });
+test('archive root searches models and sounds together while preserving folder and table filters',async()=>{
+ const {selectModels}=await import('../public/catalog.mjs');
+ const files=[
+  {id:1,name:'Wolf',path:'creature/wolf/wolf.m2',inBetaTables:true},
+  {id:2,name:'Wolf statue',path:'world/statues/wolf.m2',inBetaTables:false},
+  {id:3,name:'wolfattack.ogg',path:'sound/creature/wolf/wolfattack.ogg',type:'sound',inBetaTables:true},
+  {id:4,name:'Sword',path:'item/sword.m2',inBetaTables:true}
+ ];
+ assert.equal(selectModels(files,{folder:''}).length,4);
+ assert.deepEqual(selectModels(files,{folder:'',q:'wolf',sort:'id'}).map(file=>file.id),[1,2,3]);
+ assert.deepEqual(selectModels(files,{folder:'',q:'wolf',table:'yes',sort:'id'}).map(file=>file.id),[1,3]);
+ assert.deepEqual(selectModels(files,{folder:'',q:'wolf',table:'no'}).map(file=>file.id),[2]);
+ assert.deepEqual(selectModels(files,{folder:'sound/',q:'wolf'}).map(file=>file.id),[3]);
+ assert.deepEqual(selectModels(files,{folder:'',category:'favorites',favorites:[2,3],sort:'id'}).map(file=>file.id),[2,3]);
+});
 test('installed beta pipeline: provenance, tables, continuous sorting, decryption and rendering data',{timeout:180000,skip:process.env.WOW_INTEGRATION!=='1'},async t=>{
  const a=await new Archive().open();t.after(()=>a.close());
  const c=await new Catalog(a).build(),{selectModels,allRoots}=await import('../public/catalog.mjs');
@@ -94,6 +109,6 @@ test('UI IDs are unique and the playback control is not an SVG symbol',async()=>
  const html=await require('node:fs/promises').readFile(require('node:path').join(__dirname,'../public/index.html'),'utf8');
  const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size);
  assert.match(html,/<button id="play"/);assert.match(html,/<symbol id="icon-play"/);assert.doesNotMatch(html,/page-prev|page-next|id="family"/);
- assert.deepEqual([...html.matchAll(/data-root="([^"]+)"/g)].map(m=>m[1]),['creature/','character/','item/','models/']);assert.match(html,/<details id="subfolders">/);
+ assert.deepEqual([...html.matchAll(/data-root="([^"]*)"/g)].map(m=>m[1]),['','creature/','character/','item/','models/']);assert.match(html,/<details id="subfolders">/);
  assert.match(html,/<button id="misc-button"[^>]*>misc /);assert.match(html,/id="misc-menu"[^>]*hidden/);
 });

@@ -9,6 +9,7 @@ export const defaultSettings = Object.freeze({
 });
 
 function validFolder(folder) {
+  if (folder === '') return true; // Archive root: all models and sounds.
   return typeof folder === 'string' && allRoots.some(root => folder.startsWith(root))
     && folder.endsWith('/') && !folder.split('/').slice(0, -1).some(part => !part || part === '.' || part === '..');
 }

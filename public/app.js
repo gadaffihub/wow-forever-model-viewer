@@ -9,10 +9,15 @@ const appVersion=document.querySelector('meta[name="viewer-version"]').content;
 function saved(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 const preferences=saved('wow.preferences',{});
 let settings=normalizeSettings(saved('wow.settings',{})),skinTimer=null;
-const state={category:'all',folder:startupFolder(settings,preferences.folder),favoritesOnly:false,q:'',table:preferences.table||'all',sort:preferences.sort||'folder',direction:preferences.direction||'asc',catalog:[],revision:null,total:0,items:[],selected:null,index:-1,favorites:new Set(saved('wilds.favorites',[])),info:null,model:null,appearance:0,loading:false};
+const state={category:'all',folder:startupFolder(settings,preferences.folder),includeSounds:preferences.includeSounds===true,favoritesOnly:false,q:'',table:preferences.table||'all',sort:preferences.sort||'folder',direction:preferences.direction||'asc',catalog:[],revision:null,total:0,items:[],selected:null,index:-1,favorites:new Set(saved('wilds.favorites',[])),info:null,model:null,appearance:0,loading:false};
 let folders=buildFolderTree([]);const expandedFolders=new Set();
-let sounds=null,soundLibraryRequest,soundSkippedRecords=0;
+let sounds=null,soundLibraryRequest,soundSkippedRecords=0,allFiles=[];
 const soundMode=()=>state.folder.startsWith('sound/');
+const allMode=()=>state.folder==='';
+const mixedMode=()=>allMode()&&state.includeSounds;
+const includesSounds=()=>mixedMode()||soundMode();
+const selectedSound=()=>state.items[state.index]?.type==='sound';
+const currentLibrary=()=>mixedMode()?allFiles:soundMode()?sounds:state.catalog;
 let modelToken=0,animationToken=0,controller,toastTimer;
 function toast(text){$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 async function api(path,signal){const response=await fetch(path,{signal,cache:'no-store'}),data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||`Request failed (${response.status})`),{code:data.code});return data;}
@@ -21,8 +26,8 @@ const rowHeight=38;
 function renderList(){
  const list=$('results'),scroll=list.scrollTop;
  const start=Math.max(0,Math.min(state.items.length-1,Math.floor(scroll/rowHeight))-12),end=Math.min(state.items.length,start+Math.ceil(list.clientHeight/rowHeight)+24);
- list.innerHTML=state.items.length?`<div aria-hidden="true" style="height:${start*rowHeight}px"></div>`+state.items.slice(start,end).map((model,offset)=>`<button class="model-row ${model.id===state.selected?'selected':''}" data-id="${model.id}" data-index="${start+offset}" title="${esc(model.unavailableReason||model.name)}"><span class="model-label"><strong>${esc(model.name)}</strong></span>${state.favorites.has(model.id)?'<span class="row-star">☆</span>':''}</button>`).join('')+`<div aria-hidden="true" style="height:${(state.items.length-end)*rowHeight}px"></div>`:`<div class="empty-results">${folders.index.get(state.folder)?.count?soundMode()?'No sounds match these filters.':'No models match these filters.':`No ${soundMode()?'sounds':'viewable models'} in ${esc(state.folder)}`}</div>`;
- list.scrollTop=scroll;$('result-count').textContent=soundMode()&&sounds===null?'Loading sounds…':`${num(state.total)} ${soundMode()?(state.total===1?'sound':'sounds'):(state.total===1?'model':'models')}`;updatePosition();
+ list.innerHTML=state.items.length?`<div aria-hidden="true" style="height:${start*rowHeight}px"></div>`+state.items.slice(start,end).map((model,offset)=>`<button class="model-row ${model.id===state.selected?'selected':''}" data-id="${model.id}" data-index="${start+offset}" title="${esc(model.unavailableReason||model.path)}"><span class="model-label"><strong>${esc(model.name)}</strong></span>${state.favorites.has(model.id)?'<span class="row-star">☆</span>':''}</button>`).join('')+`<div aria-hidden="true" style="height:${(state.items.length-end)*rowHeight}px"></div>`:`<div class="empty-results">${allMode()?`No ${mixedMode()?'files':'models'} match these filters.`:folders.index.get(state.folder)?.count?soundMode()?'No sounds match these filters.':'No models match these filters.':`No ${soundMode()?'sounds':'viewable models'} in ${esc(state.folder)}`}</div>`;
+ list.scrollTop=scroll;$('result-count').textContent=includesSounds()&&sounds===null?'Loading sounds…':`${num(state.total)} ${mixedMode()?(state.total===1?'file':'files'):soundMode()?(state.total===1?'sound':'sounds'):(state.total===1?'model':'models')}`;updatePosition();
 }
 let listFrame;
 $('results').addEventListener('scroll',()=>{cancelAnimationFrame(listFrame);listFrame=requestAnimationFrame(renderList);},{passive:true});
@@ -40,39 +45,46 @@ function updatePosition(){
 function clearSelection(){
  stopSound();
  ++modelToken;++animationToken;controller?.abort();state.selected=null;state.index=-1;state.model=null;state.loading=false;playing=false;disposeModel();updatePlay();
- $('model-name').textContent='';$('model-info').textContent='';selectedInfo=null;$('appearances').innerHTML='';$('appearance-count').textContent='0';$('model-warnings').textContent='';$('animation-note').textContent='';$('animation').innerHTML='<option value="-1">No animation</option>';$('stage-message').classList.add('hidden');updatePosition();
+ $('model-name').textContent='';$('model-info').textContent='';selectedInfo=null;$('appearances').innerHTML='';$('appearance-count').textContent='0';$('model-warnings').textContent='';$('animation-note').textContent='';$('animation').innerHTML='<option value="-1">No animation</option>';$('stage-message').classList.add('hidden');syncSelectionControls();updatePosition();
 }
 function filterCatalog({preferred=state.selected,resetScroll=false}={}){
- if(soundMode()&&sounds===null){state.items=[];state.total=0;clearSelection();renderList();$('results').innerHTML='<div class="empty-results">Loading sounds…</div>';loadSoundLibrary();return;}
- try{state.items=selectModels(soundMode()?sounds:state.catalog,{...state,category:state.favoritesOnly?'favorites':'all',favorites:[...state.favorites]});}
- catch{state.category='all';state.table='all';state.sort='name';state.items=selectModels(soundMode()?sounds:state.catalog,{folder:state.folder});syncFilters();}
+ if(includesSounds()&&sounds===null){state.items=[];state.total=0;clearSelection();renderList();$('results').innerHTML='<div class="empty-results">Loading sounds…</div>';loadSoundLibrary();return;}
+ try{state.items=selectModels(currentLibrary(),{...state,category:state.favoritesOnly?'favorites':'all',favorites:[...state.favorites]});}
+ catch{state.category='all';state.table='all';state.sort='name';state.items=selectModels(currentLibrary(),{folder:state.folder});syncFilters();}
  state.total=state.items.length;state.index=state.items.findIndex(model=>model.id===preferred);
  if(resetScroll)$('results').scrollTop=0;renderList();
  if(!state.items.length){clearSelection();return;}
  const index=state.index>=0?state.index:0,model=state.items[index];
- if(model.id!==state.selected||(!state.model&&model.type!=='sound'))loadModel(model.id,index);else{state.index=index;highlightSelection();}
+ if(model.id!==state.selected||(!state.model&&model.type!=='sound'))loadModel(model.id,index);else{state.index=index;syncSelectionControls();highlightSelection();}
+}
+function syncSelectionControls(){
+ const audio=selectedSound()||(state.selected===null&&soundMode());
+ document.querySelector('.animation-panel').hidden=audio;document.querySelector('.view-controls').hidden=audio;$('snapshot').hidden=audio;$('reset-camera').hidden=audio;
+ document.querySelector('[data-panel="skins"]').hidden=audio;
+ $('favorite').setAttribute('aria-label',audio?'Favorite sound':'Favorite model');
 }
 function syncFilters(){
+ $('include-sounds').checked=state.includeSounds;document.querySelector('.all-selector').classList.toggle('active',allMode());
  const audio=soundMode();document.querySelector('[data-sort="skins"]').hidden=audio;
- document.querySelector('.animation-panel').hidden=audio;document.querySelector('.view-controls').hidden=audio;$('snapshot').hidden=audio;$('reset-camera').hidden=audio;
- document.querySelector('[data-panel="skins"]').hidden=audio;$('results').setAttribute('aria-label',audio?'Sounds':'Models');$('search').placeholder=audio?'Search sounds…':'Search models…';$('search').setAttribute('aria-label',audio?'Search sounds':'Search models');
- for(const [id,label]of [['prev-model','Previous'],['next-model','Next']]){$(id).setAttribute('aria-label',`${label} ${audio?'sound':'model'}`);$(id).title=`${label} ${audio?'sound':'model'} (${id==='prev-model'?'←':'→'})`;}
- $('favorite').setAttribute('aria-label',audio?'Favorite sound':'Favorite model');
- const rootPath=allRoots.find(path=>state.folder.startsWith(path))||'creature/';
- $('misc-button').classList.toggle('active',!modelRoots.includes(rootPath));
+ syncSelectionControls();
+ const noun=mixedMode()?'files':audio?'sounds':'models';
+ $('results').setAttribute('aria-label',noun);$('search').placeholder=`Search ${noun}…`;$('search').setAttribute('aria-label',`Search ${noun}`);
+ for(const [id,label]of [['prev-model','Previous'],['next-model','Next']]){$(id).setAttribute('aria-label',`${label} ${mixedMode()?'file':audio?'sound':'model'}`);$(id).title=`${label} ${mixedMode()?'file':audio?'sound':'model'} (${id==='prev-model'?'←':'→'})`;}
+ const rootPath=allRoots.find(path=>state.folder.startsWith(path));
+ $('misc-button').classList.toggle('active',!allMode()&&!modelRoots.includes(rootPath));
  document.querySelectorAll('[data-misc-root]').forEach(button=>button.classList.toggle('active',button.dataset.miscRoot===rootPath));
- const summary=$('subfolders').querySelector('summary');summary.textContent=state.folder===rootPath&&modelRoots.includes(rootPath)?'Subfolders':state.folder;summary.title=state.folder;
- document.querySelectorAll('[data-root]').forEach(button=>{const active=state.folder.startsWith(button.dataset.root);button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
+ const summary=$('subfolders').querySelector('summary');summary.textContent=allMode()?'Folders':state.folder===rootPath&&modelRoots.includes(rootPath)?'Subfolders':state.folder;summary.title=state.folder;
+ document.querySelectorAll('[data-root]').forEach(button=>{const active=button.dataset.root===''?allMode():state.folder.startsWith(button.dataset.root);button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
  document.querySelectorAll('[data-folder]').forEach(button=>{const active=button.dataset.folder===state.folder;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});$('only-favorites').classList.toggle('active',state.favoritesOnly);$('only-favorites').setAttribute('aria-pressed',String(state.favoritesOnly));
  const tableKind=referenceLabel(state.folder);$('table-filter').options[1].textContent=`In ${tableKind} tables`;$('table-filter').options[2].textContent=`Not in ${tableKind} tables`;$('table-filter').value=state.table;
  document.querySelectorAll('[data-sort]').forEach(button=>{const active=button.dataset.sort===state.sort;button.classList.toggle('active',active);button.textContent={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size',table:'Beta table'}[button.dataset.sort]+(active?(state.direction==='asc'?' ↑':' ↓'):'');});
 }
 function changeFilter(){
- localStorage.setItem('wow.preferences',JSON.stringify({folder:state.folder,table:state.table,sort:state.sort,direction:state.direction}));syncFilters();filterCatalog({resetScroll:true});
+ localStorage.setItem('wow.preferences',JSON.stringify({folder:state.folder,includeSounds:state.includeSounds,table:state.table,sort:state.sort,direction:state.direction}));syncFilters();filterCatalog({resetScroll:true});
 }
 function next(direction){const index=state.index<0?0:state.index+direction;if(index>=0&&index<state.items.length)loadModel(state.items[index].id,index);}
 function chooseRoot(path){
- if(!allRoots.includes(path))return;
+ if(path!==''&&!allRoots.includes(path))return;
  state.folder=path;
  if(soundMode()&&['skins','table'].includes(state.sort))state.sort='folder';
  if(!modelRoots.includes(path))state.table='all';
@@ -80,6 +92,7 @@ function chooseRoot(path){
 }
 function closeMisc(){$('misc-menu').hidden=true;$('misc-button').setAttribute('aria-expanded','false');}
 $('misc-menu').innerHTML=miscRoots.map(path=>`<button data-misc-root="${esc(path)}">${esc(path)}</button>`).join('');
+$('include-sounds').onchange=()=>{state.includeSounds=$('include-sounds').checked;if(allMode())changeFilter();else chooseRoot('');};
 $('misc-button').onclick=()=>{const open=$('misc-menu').hidden;$('misc-menu').hidden=!open;$('misc-button').setAttribute('aria-expanded',String(open));};
 $('misc-menu').onclick=event=>{const button=event.target.closest('[data-misc-root]');if(button)chooseRoot(button.dataset.miscRoot);};
 document.addEventListener('click',event=>{if(!event.target.closest('.misc-selector'))closeMisc();});
@@ -117,7 +130,7 @@ async function loadModel(id,index,{autoplay=settings.autoplaySounds}={}){
  if(state.items[index]?.type==='sound'){loadSound(id,index,autoplay);return;}
  soundPlayer.controls=false;soundPlayer.remove();
  stopSound();
- const token=++modelToken;++animationToken;controller?.abort();controller=new AbortController();state.selected=id;state.index=index;state.loading=true;loadInfo(id,token);state.model=null;playing=false;updatePlay();disposeModel();highlightSelection();const entry=state.items[index];$('model-name').textContent=entry?.name||`Model ${id}`;message('Loading…','',true);$('animation-note').textContent='';$('model-warnings').textContent='';$('appearances').innerHTML='';$('appearance-count').textContent='—';$('animation').innerHTML='<option value="-1">Bind pose</option>';
+ const token=++modelToken;++animationToken;controller?.abort();controller=new AbortController();state.selected=id;state.index=index;state.loading=true;loadInfo(id,token);state.model=null;playing=false;updatePlay();disposeModel();syncSelectionControls();highlightSelection();const entry=state.items[index];$('model-name').textContent=entry?.name||`Model ${id}`;message('Loading…','',true);$('animation-note').textContent='';$('model-warnings').textContent='';$('appearances').innerHTML='';$('appearance-count').textContent='—';$('animation').innerHTML='<option value="-1">Bind pose</option>';
  try{if(entry&&!entry.readable)throw new Error(entry.unavailableReason);const m=await api(`/api/model/${id}`,controller.signal);if(token!==modelToken)return;state.model=m;state.loading=false;renderInfo();buildMesh(m);$('model-name').textContent=m.entry.name;$('appearance-count').textContent=m.appearances.length;$('appearances').innerHTML=m.appearances.length?m.appearances.map((a,i)=>`<button class="appearance" data-appearance="${i}" title="${esc(skinLabel(a.label,m.entry.name))}" aria-label="${esc(skinLabel(a.label,m.entry.name))}"><span class="skin-loading">Loading…</span><span class="skin-label">${esc(skinLabel(a.label,m.entry.name))}</span></button>`).join(''):'<p class="muted" style="grid-column:1/-1">No alternate skins in this client’s creature tables.</p>';
  $('animation').innerHTML='<option value="-1">Bind pose</option>'+m.animations.map((a,i)=>`<option value="${i}">${esc(a.name)}</option>`).join('');await applyAppearance(0);if(token!==modelToken)return;$('stage-message').classList.add('hidden');const idle=m.animations.findIndex(a=>a.id===0);const first=idle>=0?idle:m.animations.length?0:-1;$('animation').value=String(first);if(first>=0)await loadAnimation(first);if(token!==modelToken)return;fitCamera();generateSkinPreviews(m,token).catch(e=>{if(token===modelToken)$('model-warnings').textContent='Skin previews: '+e.message;});localStorage.setItem('wilds.lastModel',String(id));$('results').querySelector('.selected')?.scrollIntoView({block:'nearest'});
  }catch(e){if(e.name==='AbortError'||token!==modelToken)return;state.loading=false;if(e.code==='OUTSIDE_CATALOG'){await fetchCatalog();return;}message('This model couldn’t be opened',e.message+' Use → to continue exploring.');$('model-warnings').textContent=e.message;}
@@ -128,8 +141,8 @@ function sample(t,time,kind){const fallback=kind==='scale'?[1,1,1]:kind==='rotat
 function animateBones(time){const m=state.model;if(!m||!clip)return;const done=new Uint8Array(m.bones.length);function update(i){if(done[i])return;done[i]=1;const bone=m.bones[i],tracks=clip.bones[i],parent=bone.parent;if(parent>=0&&parent<m.bones.length&&parent!==i)update(parent);const translation=sample(tracks?.translation,time,'translation'),rotation=sample(tracks?.rotation,time,'rotation'),scale=sample(tracks?.scale,time,'scale');trackV.fromArray(translation).add(pivotV.fromArray(bone.pivot));trackQ.fromArray(rotation).normalize();trackS.fromArray(scale);const mat=boneMatrices[i];mat.compose(trackV,trackQ,trackS);negativePivot.makeTranslation(-bone.pivot[0],-bone.pivot[1],-bone.pivot[2]);mat.multiply(negativePivot);if(parent>=0&&parent<m.bones.length&&parent!==i)mat.premultiply(boneMatrices[parent]);boneNodes[i].matrixWorld.copy(mat);}for(let i=0;i<m.bones.length;i++)update(i);}
 let lastTime=performance.now(),lastUI=0;renderer.setAnimationLoop(time=>{const delta=Math.min((time-lastTime)/1000,.1);lastTime=time;if(clip){if(playing)elapsed=(elapsed+delta*Number($('speed').value))%Math.max(.001,clip.duration/1000);if(playing)animateBones(elapsed*1000);if(time-lastUI>100){$('timeline').value=String(elapsed/(clip.duration/1000||1));$('time-label').textContent=`${elapsed.toFixed(2)} / ${(clip.duration/1000).toFixed(2)} s`;lastUI=time;}}if(root&&$('rotate').checked)root.rotation.y+=delta*.23;controls.update();renderer.render(scene,camera);});
 
-$('results').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b)loadModel(Number(b.dataset.id),Number(b.dataset.index));});$('folder-buttons').onclick=event=>{const button=event.target.closest('[data-root]');if(button)chooseRoot(button.dataset.root);};$('folder-tree').onclick=event=>{const expand=event.target.closest('[data-expand]');if(expand){const path=expand.dataset.expand;expandedFolders.has(path)?expandedFolders.delete(path):expandedFolders.add(path);renderFolderTree();return;}const button=event.target.closest('[data-folder]');if(button){state.folder=button.dataset.folder;changeFilter();}};$('only-favorites').onclick=()=>{state.favoritesOnly=!state.favoritesOnly;changeFilter();};let searchTimer;$('search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=$('search').value;changeFilter();},180);};document.querySelectorAll('[data-sort]').forEach(button=>button.onclick=()=>{const sort=button.dataset.sort;state.direction=state.sort===sort?(state.direction==='asc'?'desc':'asc'):(['folder','name'].includes(sort)?'asc':'desc');state.sort=sort;document.querySelectorAll('[data-sort]').forEach(b=>{const label={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size'}[b.dataset.sort];b.classList.toggle('active',b===button);b.textContent=label+(b===button?(state.direction==='asc'?' ↑':' ↓'):'');});changeFilter();});$('table-filter').onchange=()=>{state.table=$('table-filter').value;changeFilter();};$('prev-model').onclick=()=>next(-1);$('next-model').onclick=()=>next(1);$('favorite').onclick=favorite;$('reset-camera').onclick=()=>{if(root)root.rotation.y=0;fitCamera();};$('appearances').onclick=e=>{const b=e.target.closest('[data-appearance]');if(b)applyAppearance(Number(b.dataset.appearance));};$('animation').onchange=()=>loadAnimation(Number($('animation').value));$('play').onclick=()=>{playing=!playing;updatePlay();};$('timeline').oninput=()=>{if(clip)elapsed=Number($('timeline').value)*clip.duration/1000;};$('wireframe').onchange=()=>meshes.forEach(m=>m.material.wireframe=$('wireframe').checked);document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{scene.background.set(b.dataset.bg);document.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('selected',x===b));});
-$('snapshot').onclick=()=>{if(!state.model)return;renderer.render(scene,camera);renderer.domElement.toBlob(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wow-${state.selected}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Screenshot saved');},'image/png');};window.addEventListener('keydown',e=>{if(!$('settings-panel').hidden||e.target.closest('input,select,textarea,audio,[contenteditable]')||e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextSkin(1):next(1);}else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?nextSkin(-1):next(-1);}else if(e.code==='Space'){e.preventDefault();if(soundMode()){if(state.selected)playSound(state.selected);}else{playing=!playing;updatePlay();}}else if(e.key.toLowerCase()==='f')favorite();else if(e.key==='0'){$('reset-camera').click();}else if(e.key==='/'){e.preventDefault();$('search').focus();}});
+$('results').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b)loadModel(Number(b.dataset.id),Number(b.dataset.index));});document.querySelector('.folder-controls').onclick=event=>{const button=event.target.closest('[data-root]');if(button)chooseRoot(button.dataset.root);};$('folder-tree').onclick=event=>{const expand=event.target.closest('[data-expand]');if(expand){const path=expand.dataset.expand;expandedFolders.has(path)?expandedFolders.delete(path):expandedFolders.add(path);renderFolderTree();return;}const button=event.target.closest('[data-folder]');if(button){state.folder=button.dataset.folder;renderFolderTree();changeFilter();}};$('only-favorites').onclick=()=>{state.favoritesOnly=!state.favoritesOnly;changeFilter();};let searchTimer;$('search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=$('search').value;changeFilter();},180);};document.querySelectorAll('[data-sort]').forEach(button=>button.onclick=()=>{const sort=button.dataset.sort;state.direction=state.sort===sort?(state.direction==='asc'?'desc':'asc'):(['folder','name'].includes(sort)?'asc':'desc');state.sort=sort;document.querySelectorAll('[data-sort]').forEach(b=>{const label={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size'}[b.dataset.sort];b.classList.toggle('active',b===button);b.textContent=label+(b===button?(state.direction==='asc'?' ↑':' ↓'):'');});changeFilter();});$('table-filter').onchange=()=>{state.table=$('table-filter').value;changeFilter();};$('prev-model').onclick=()=>next(-1);$('next-model').onclick=()=>next(1);$('favorite').onclick=favorite;$('reset-camera').onclick=()=>{if(root)root.rotation.y=0;fitCamera();};$('appearances').onclick=e=>{const b=e.target.closest('[data-appearance]');if(b)applyAppearance(Number(b.dataset.appearance));};$('animation').onchange=()=>loadAnimation(Number($('animation').value));$('play').onclick=()=>{playing=!playing;updatePlay();};$('timeline').oninput=()=>{if(clip)elapsed=Number($('timeline').value)*clip.duration/1000;};$('wireframe').onchange=()=>meshes.forEach(m=>m.material.wireframe=$('wireframe').checked);document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{scene.background.set(b.dataset.bg);document.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('selected',x===b));});
+$('snapshot').onclick=()=>{if(!state.model)return;renderer.render(scene,camera);renderer.domElement.toBlob(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wow-${state.selected}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Screenshot saved');},'image/png');};window.addEventListener('keydown',e=>{if(!$('settings-panel').hidden||e.target.closest('input,select,textarea,audio,[contenteditable]')||e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextSkin(1):next(1);}else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?nextSkin(-1):next(-1);}else if(e.code==='Space'){e.preventDefault();if(selectedSound()){if(state.selected)playSound(state.selected);}else{playing=!playing;updatePlay();}}else if(e.key.toLowerCase()==='f')favorite();else if(e.key==='0'){$('reset-camera').click();}else if(e.key==='/'){e.preventDefault();$('search').focus();}});
 let initialized=false,polling=false;
 async function fetchCatalog(){
  const snapshot=await api('/api/catalog');
@@ -240,18 +253,19 @@ function renderInfo(){
 document.querySelectorAll('[data-panel]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-panel]').forEach(b=>b.classList.toggle('active',b===button));$('skins-panel').hidden=button.dataset.panel!=='skins';$('info-panel').hidden=button.dataset.panel!=='info';});
 
 function populateFolders(){
- folders=buildFolderTree(sounds?[...state.catalog,...sounds]:state.catalog);
- if(!folders.index.has(state.folder)&&!soundMode())state.folder='creature/';
+ allFiles=sounds?[...state.catalog,...sounds]:state.catalog;
+ folders=buildFolderTree(allFiles);
+ if(!allMode()&&!folders.index.has(state.folder)&&!soundMode())state.folder='creature/';
  renderFolderTree();syncFilters();
 }
 function renderFolderTree(){
- const rootPath=allRoots.find(path=>state.folder.startsWith(path))||'creature/';
+ const rootPath=allRoots.find(path=>state.folder.startsWith(path));
  const rootNode=folders.index.get(rootPath),collator=new Intl.Collator('en',{numeric:true,sensitivity:'base'});
  const render=(nodes,depth)=>[...nodes.values()].sort((a,b)=>collator.compare(a.name,b.name)).map(node=>{
    const open=expandedFolders.has(node.path);
    return `<div class="folder-row" style="padding-left:${depth*12}px">${node.children.size?`<button class="folder-expand" data-expand="${esc(node.path)}" aria-label="${open?'Collapse':'Expand'} ${esc(node.path)}" aria-expanded="${open}">${open?'▾':'▸'}</button>`:'<span class="folder-indent"></span>'}<button class="folder-name" data-folder="${esc(node.path)}" title="${esc(node.path)}">${esc(node.name)}</button></div>`+(open?render(node.children,depth+1):'');
  }).join('');
- $('folder-tree').innerHTML=rootNode?.children.size?render(rootNode.children,0):'<span class="muted">No subfolders</span>';
+ $('folder-tree').innerHTML=allMode()?render(new Map(folders.roots.map(node=>[node.path,node])),0):rootNode?.children.size?render(rootNode.children,0):'<span class="muted">No subfolders</span>';
  syncFilters();
 }
 
@@ -261,15 +275,15 @@ async function loadSoundLibrary(){
    try{
      const result=await api('/api/sounds');
      sounds=result.items.map(([id,path,size,inBetaTables])=>({id,path,size,type:'sound',name:path.split('/').at(-1),inBetaTables,appearanceCount:0}));soundSkippedRecords=result.skippedRecords;
-     populateFolders();if(soundMode())filterCatalog({resetScroll:true});
-   }catch(error){if(soundMode()){$('results').innerHTML=`<div class="empty-results">${esc(error.message)} <button id="retry-sounds">Retry</button></div>`;$('retry-sounds').onclick=()=>{soundLibraryRequest=null;filterCatalog();};}}
+     populateFolders();if(includesSounds())filterCatalog({resetScroll:true});
+   }catch(error){if(includesSounds()){$('results').innerHTML=`<div class="empty-results">${esc(error.message)} <button id="retry-sounds">Retry</button></div>`;$('retry-sounds').onclick=()=>{soundLibraryRequest=null;filterCatalog();};}}
  })();
  return soundLibraryRequest;
 }
 
 function loadSound(id,index,autoplay){
  ++modelToken;++animationToken;controller?.abort();stopSound();disposeModel();playing=false;updatePlay();selectedInfo=null;
- const entry=state.items[index];state.selected=id;state.index=index;state.model=null;state.loading=false;highlightSelection();
+ const entry=state.items[index];state.selected=id;state.index=index;state.model=null;state.loading=false;syncSelectionControls();highlightSelection();
  $('model-name').textContent=entry.name;$('animation-note').textContent='';$('model-warnings').textContent='';$('appearances').innerHTML='';$('appearance-count').textContent='0';
  message(entry.name);soundPlayer.controls=true;soundPlayer.setAttribute('aria-label','Sound playback');soundPlayer.src=soundURL(id);selectedSoundID=id;$('stage-message').appendChild(soundPlayer);
  $('model-info').innerHTML=`<dl>${infoRow('File',entry.name)}${infoRow('File ID',id)}${infoRow('Path',entry.path)}${infoRow('Size',num(entry.size)+' bytes')}${infoRow('Beta table references',entry.inBetaTables?'SoundKitEntry.FileDataID':'None in readable SoundKitEntry records')}${infoRow('Source','Installed beta '+(state.info?.build.version||''))}</dl>`+(soundSkippedRecords?`<p class="info-note">${num(soundSkippedRecords)} sound-table records could not be read.</p>`:'');
@@ -281,8 +295,8 @@ function saveViewerSettings(){
  settings=normalizeSettings(settings);localStorage.setItem('wow.settings',JSON.stringify(settings));
 }
 function renderStartupFolders(){
- const choices=[['last','Last opened folder'],...allRoots.map(path=>[path,path])];
- if(settings.startupFolder!=='last'&&!allRoots.includes(settings.startupFolder))choices.push([settings.startupFolder,settings.startupFolder]);
+ const choices=[['last','Last opened folder'],['','All'],...allRoots.map(path=>[path,path])];
+ if(settings.startupFolder!==''&&settings.startupFolder!=='last'&&!allRoots.includes(settings.startupFolder))choices.push([settings.startupFolder,settings.startupFolder]);
  $('startup-folder').innerHTML=choices.map(([value,label])=>`<option value="${esc(value)}">${esc(label)}</option>`).join('');$('startup-folder').value=settings.startupFolder;
 }
 function closeSettings(){
@@ -303,7 +317,7 @@ $('settings-close').onclick=()=>{closeSettings();$('settings-button').focus();};
 document.addEventListener('click',event=>{if(!event.target.closest('#settings-panel,#settings-button'))closeSettings();});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('settings-panel').hidden){event.preventDefault();closeSettings();$('settings-button').focus();}});
 $('autoplay-animations').onchange=()=>{settings.autoplayAnimations=$('autoplay-animations').checked;saveViewerSettings();playing=!!clip&&settings.autoplayAnimations;updatePlay();};
-$('autoplay-sounds').onchange=()=>{settings.autoplaySounds=$('autoplay-sounds').checked;saveViewerSettings();if(!settings.autoplaySounds){++soundToken;soundPlayer.pause();}else if(soundMode()&&state.selected&&soundPlayer.paused)playSound(state.selected);};
+$('autoplay-sounds').onchange=()=>{settings.autoplaySounds=$('autoplay-sounds').checked;saveViewerSettings();if(!settings.autoplaySounds){++soundToken;soundPlayer.pause();}else if(selectedSound()&&state.selected&&soundPlayer.paused)playSound(state.selected);};
 $('cycle-skins').onchange=()=>{settings.cycleSkins=$('cycle-skins').checked;saveViewerSettings();$('skin-interval').disabled=!settings.cycleSkins;scheduleSkinCycle();};
 $('skin-interval').onchange=()=>{settings.skinInterval=$('skin-interval').valueAsNumber;saveViewerSettings();$('skin-interval').value=settings.skinInterval;scheduleSkinCycle();};
 $('startup-folder').onchange=()=>{settings.startupFolder=$('startup-folder').value;saveViewerSettings();};
