@@ -8,8 +8,7 @@
 <div class="settings-heading"><strong id="settings-title">Settings</strong><button id="settings-close" aria-label="Close settings">×</button></div>
 <label class="setting-check"><input id="autoplay-animations" type="checkbox">Autoplay animations</label>
 <label class="setting-check"><input id="autoplay-sounds" type="checkbox">Autoplay sounds</label>
-<label class="setting-check"><input id="cycle-skins" type="checkbox">Cycle skins automatically</label>
-<label class="setting-row" for="skin-interval">Seconds per skin <input id="skin-interval" type="number" min="1" max="60" step="1" value="5"></label>
+<div class="skin-cycle-setting"><label class="setting-check"><input id="cycle-skins" type="checkbox">Cycle skins automatically</label><label id="skin-interval-setting" title="Seconds per skin" hidden><input id="skin-interval" type="number" aria-label="Seconds per skin" min="1" max="60" step="1" value="5">s</label></div>
 <label class="setting-check"><input id="include-sounds" type="checkbox">Include sounds in All</label>
 <label class="setting-label" for="startup-folder">Startup folder</label><select id="startup-folder"></select><button id="use-current-folder" class="settings-action">Use current folder</button>
 <div class="setting-label">WoW installation</div><p id="installation-path" class="settings-path"></p><button id="choose-installation" class="settings-action" hidden>Choose folder…</button>

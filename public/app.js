@@ -307,7 +307,7 @@ async function openSettings(){
  closeMisc();$('settings-panel').hidden=false;$('settings-button').setAttribute('aria-expanded','true');$('settings-status').textContent='';
  $('include-sounds').checked=state.includeSounds;
  $('autoplay-animations').checked=settings.autoplayAnimations;$('autoplay-sounds').checked=settings.autoplaySounds;$('cycle-skins').checked=settings.cycleSkins;
- $('skin-interval').value=settings.skinInterval;$('skin-interval').disabled=!settings.cycleSkins;renderStartupFolders();
+ $('skin-interval').value=settings.skinInterval;$('skin-interval-setting').hidden=!settings.cycleSkins;renderStartupFolders();
  const native=!!window.webkit?.messageHandlers?.chooseInstallation;$('choose-installation').hidden=!native;$('installation-form').hidden=native;
  $('installation-path').textContent=state.info?.build.path||'No installation selected';$('installation-input').value=state.info?.build.path||'';
  $('settings-close').focus();
@@ -320,7 +320,7 @@ document.addEventListener('click',event=>{if(!event.target.closest('#settings-pa
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('settings-panel').hidden){event.preventDefault();closeSettings();$('settings-button').focus();}});
 $('autoplay-animations').onchange=()=>{settings.autoplayAnimations=$('autoplay-animations').checked;saveViewerSettings();playing=!!clip&&settings.autoplayAnimations;updatePlay();};
 $('autoplay-sounds').onchange=()=>{settings.autoplaySounds=$('autoplay-sounds').checked;saveViewerSettings();if(!settings.autoplaySounds){++soundToken;soundPlayer.pause();}else if(selectedSound()&&state.selected&&soundPlayer.paused)playSound(state.selected);};
-$('cycle-skins').onchange=()=>{settings.cycleSkins=$('cycle-skins').checked;saveViewerSettings();$('skin-interval').disabled=!settings.cycleSkins;scheduleSkinCycle();};
+$('cycle-skins').onchange=()=>{settings.cycleSkins=$('cycle-skins').checked;saveViewerSettings();$('skin-interval-setting').hidden=!settings.cycleSkins;scheduleSkinCycle();};
 $('skin-interval').onchange=()=>{settings.skinInterval=$('skin-interval').valueAsNumber;saveViewerSettings();$('skin-interval').value=settings.skinInterval;scheduleSkinCycle();};
 $('include-sounds').onchange=()=>{state.includeSounds=$('include-sounds').checked;if(allMode())changeFilter();else savePreferences();};
 $('startup-folder').onchange=()=>{settings.startupFolder=$('startup-folder').value;saveViewerSettings();};
