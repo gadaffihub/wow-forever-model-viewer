@@ -85,7 +85,7 @@ The viewer then converts Ogg to WAV locally in memory. It looks for `ffmpeg` on 
 
 ## Browse
 
-- **All** searches every model folder. Check **incl. sounds** beside it to also search the sound library; the choice is remembered between launches. Expand **Folders** to browse the archive roots.
+- **All** searches every model folder. Check **incl. sounds** below the folder buttons to also search the sound library; the choice is remembered between launches. Expand **Folders** to browse the archive roots.
 - **creature/**, **character/**, **item/** and **models/** select actual archive path prefixes. **misc** selects other roots such as **world/**, **spells/** and **sound/**. Expand **Subfolders** only when you want to narrow the list.
 - **sound/** lists the installed Ogg, MP3 and WAV files with known paths. Click a row to play it. Search matches filenames, paths and file IDs. Folder, name, file ID and size sorting work across the continuous list; subfolders can narrow it to music, creatures or other audio groups. The player has play/pause, a seek bar and volume.
 - Model lists offer folder, name, file ID, skin count and size sorting. Click a sort button again to reverse it.

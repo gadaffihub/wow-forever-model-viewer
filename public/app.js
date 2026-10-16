@@ -64,7 +64,7 @@ function syncSelectionControls(){
  $('favorite').setAttribute('aria-label',audio?'Favorite sound':'Favorite model');
 }
 function syncFilters(){
- $('include-sounds').checked=state.includeSounds;document.querySelector('.all-selector').classList.toggle('active',allMode());
+ $('include-sounds').checked=state.includeSounds;$('include-sounds-option').hidden=!allMode();
  const audio=soundMode();document.querySelector('[data-sort="skins"]').hidden=audio;
  syncSelectionControls();
  const noun=mixedMode()?'files':audio?'sounds':'models';
