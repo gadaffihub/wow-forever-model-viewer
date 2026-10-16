@@ -64,7 +64,6 @@ function syncSelectionControls(){
  $('favorite').setAttribute('aria-label',audio?'Favorite sound':'Favorite model');
 }
 function syncFilters(){
- $('include-sounds').checked=state.includeSounds;$('include-sounds-option').hidden=!allMode();
  const audio=soundMode();document.querySelector('[data-sort="skins"]').hidden=audio;
  syncSelectionControls();
  const noun=mixedMode()?'files':audio?'sounds':'models';
@@ -79,8 +78,11 @@ function syncFilters(){
  const tableKind=referenceLabel(state.folder);$('table-filter').options[1].textContent=`In ${tableKind} tables`;$('table-filter').options[2].textContent=`Not in ${tableKind} tables`;$('table-filter').value=state.table;
  document.querySelectorAll('[data-sort]').forEach(button=>{const active=button.dataset.sort===state.sort;button.classList.toggle('active',active);button.textContent={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size',table:'Beta table'}[button.dataset.sort]+(active?(state.direction==='asc'?' ↑':' ↓'):'');});
 }
+function savePreferences(){
+ localStorage.setItem('wow.preferences',JSON.stringify({folder:state.folder,includeSounds:state.includeSounds,table:state.table,sort:state.sort,direction:state.direction}));
+}
 function changeFilter(){
- localStorage.setItem('wow.preferences',JSON.stringify({folder:state.folder,includeSounds:state.includeSounds,table:state.table,sort:state.sort,direction:state.direction}));syncFilters();filterCatalog({resetScroll:true});
+ savePreferences();syncFilters();filterCatalog({resetScroll:true});
 }
 function next(direction){const index=state.index<0?0:state.index+direction;if(index>=0&&index<state.items.length)loadModel(state.items[index].id,index);}
 function chooseRoot(path){
@@ -92,7 +94,6 @@ function chooseRoot(path){
 }
 function closeMisc(){$('misc-menu').hidden=true;$('misc-button').setAttribute('aria-expanded','false');}
 $('misc-menu').innerHTML=miscRoots.map(path=>`<button data-misc-root="${esc(path)}">${esc(path)}</button>`).join('');
-$('include-sounds').onchange=()=>{state.includeSounds=$('include-sounds').checked;if(allMode())changeFilter();else chooseRoot('');};
 $('misc-button').onclick=()=>{const open=$('misc-menu').hidden;$('misc-menu').hidden=!open;$('misc-button').setAttribute('aria-expanded',String(open));};
 $('misc-menu').onclick=event=>{const button=event.target.closest('[data-misc-root]');if(button)chooseRoot(button.dataset.miscRoot);};
 document.addEventListener('click',event=>{if(!event.target.closest('.misc-selector'))closeMisc();});
@@ -304,6 +305,7 @@ function closeSettings(){
 }
 async function openSettings(){
  closeMisc();$('settings-panel').hidden=false;$('settings-button').setAttribute('aria-expanded','true');$('settings-status').textContent='';
+ $('include-sounds').checked=state.includeSounds;
  $('autoplay-animations').checked=settings.autoplayAnimations;$('autoplay-sounds').checked=settings.autoplaySounds;$('cycle-skins').checked=settings.cycleSkins;
  $('skin-interval').value=settings.skinInterval;$('skin-interval').disabled=!settings.cycleSkins;renderStartupFolders();
  const native=!!window.webkit?.messageHandlers?.chooseInstallation;$('choose-installation').hidden=!native;$('installation-form').hidden=native;
@@ -320,6 +322,7 @@ $('autoplay-animations').onchange=()=>{settings.autoplayAnimations=$('autoplay-a
 $('autoplay-sounds').onchange=()=>{settings.autoplaySounds=$('autoplay-sounds').checked;saveViewerSettings();if(!settings.autoplaySounds){++soundToken;soundPlayer.pause();}else if(selectedSound()&&state.selected&&soundPlayer.paused)playSound(state.selected);};
 $('cycle-skins').onchange=()=>{settings.cycleSkins=$('cycle-skins').checked;saveViewerSettings();$('skin-interval').disabled=!settings.cycleSkins;scheduleSkinCycle();};
 $('skin-interval').onchange=()=>{settings.skinInterval=$('skin-interval').valueAsNumber;saveViewerSettings();$('skin-interval').value=settings.skinInterval;scheduleSkinCycle();};
+$('include-sounds').onchange=()=>{state.includeSounds=$('include-sounds').checked;if(allMode())changeFilter();else savePreferences();};
 $('startup-folder').onchange=()=>{settings.startupFolder=$('startup-folder').value;saveViewerSettings();};
 $('use-current-folder').onclick=()=>{settings.startupFolder=state.folder;saveViewerSettings();renderStartupFolders();};
 $('choose-installation').onclick=()=>{closeSettings();window.webkit?.messageHandlers?.chooseInstallation.postMessage(null);};
