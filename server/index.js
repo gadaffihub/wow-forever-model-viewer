@@ -11,7 +11,7 @@ const {Metadata} = require('./metadata');
 const {parseM2, parseWMO, animation} = require('./models');
 const {decodeBLP, png} = require('./blp');
 const {createAudioReader, sendAudio} = require('./audio');
-const {soundIndex} = require('./sounds');
+const {loadSoundIndex} = require('./sounds');
 const {values: options} = parseArgs({options: {'wow-path': {type: 'string'}, port: {type: 'string'}, help: {type: 'boolean'}}});
 if (options.help) {console.log('npm start -- [--wow-path "/path/to/World of Warcraft"] [--port 4317]');process.exit(0);}
 const PORT = Number(options.port || process.env.PORT || 4317);
@@ -20,7 +20,7 @@ const archive = new Archive(options['wow-path']);
 const readAudio = createAudioReader(archive);
 const models = new Map(), pending = new Map(), textures = new Map();
 let catalog, metadata, initError, appVersion;
-let soundItems;
+let soundLibrary;
 const staticFiles = new Map();
 
 async function loadAssets() {
@@ -73,7 +73,10 @@ const server = http.createServer(async (req, res) => {
       if (!catalog) return send(req, res, 503, {error: initError?.message || 'Opening the beta catalog.'});
       if (route === '/api/catalog') return send(req, res, 200, {appVersion, ...catalog.snapshot()});
       if (route === '/api/models') return send(req, res, 200, catalog.query(url.searchParams));
-      if (route === '/api/sounds') {soundItems ||= soundIndex(archive);return send(req, res, 200, {items: soundItems, build: archive.build, revision: catalog.revision});}
+      if (route === '/api/sounds') {
+        soundLibrary ||= loadSoundIndex(archive).catch(error => {soundLibrary = null;throw error;});
+        return send(req, res, 200, {...await soundLibrary, build: archive.build, revision: catalog.revision});
+      }
       let match = route.match(/^\/api\/model\/(\d+)\/info$/);
       if (match) return send(req, res, 200, await metadata.get(Number(match[1])));
       match = route.match(/^\/api\/model\/(\d+)$/);

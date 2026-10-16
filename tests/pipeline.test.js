@@ -58,8 +58,11 @@ test('installed beta pipeline: provenance, tables, continuous sorting, decryptio
  const {Metadata}=require('../server/metadata'),metadata=new Metadata(a,c),itemInfo=await metadata.get(referencedItems[0].id);
  assert.ok(itemInfo.itemDisplayIDs.length>0);assert.equal(itemInfo.raw.ItemDisplayInfo.length,itemInfo.itemDisplayIDs.length);
  const readAudio=createAudioReader(a);
- const sounds=require('../server/sounds').soundIndex(a);assert.ok(sounds.length>100000);
- for(const [id,name]of sounds){assert.ok(a.files.get(id)?.local);assert.equal(a.names.get(id),name);assert.ok(name.startsWith('sound/'));}
+ const soundCatalog=await require('../server/sounds').loadSoundIndex(a),sounds=soundCatalog.items;assert.ok(sounds.length>100000);
+ const soundEntries=await readDB(a,'SoundKitEntry'),soundReferences=new Set([...soundEntries.rows.values()].map(row=>row.FileDataID));
+ assert.equal(soundCatalog.skippedRecords,soundEntries.skipped);assert.equal(soundCatalog.referenceTable,'SoundKitEntry');
+ for(const [id,name,,referenced]of sounds){assert.ok(a.files.get(id)?.local);assert.equal(a.names.get(id),name);assert.ok(name.startsWith('sound/'));assert.equal(referenced,soundReferences.has(id));}
+ assert.ok(sounds.some(row=>row[3]));assert.ok(sounds.some(row=>!row[3]));
  for(const [id,type] of [[53183,'audio/mpeg'],[537320,'audio/ogg']]){const sound=await readAudio(id);assert.equal(sound.type,type);assert.equal(crypto.createHash('md5').update(sound.data).digest('hex'),a.files.get(id).contentKey);assert.equal(await readAudio(id),sound);}
  const wav=await readAudio(548053,{wav:true});assert.equal(wav.type,'audio/wav');assert.equal(wav.data.toString('ascii',8,12),'WAVE');assert.equal(wav.data.readUInt32LE(4),wav.data.length-8);assert.equal(await readAudio(548053,{wav:true}),wav);
  await assert.rejects(readAudio(126487),/not a supported sound/);

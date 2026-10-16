@@ -88,7 +88,7 @@ The viewer then converts Ogg to WAV locally in memory. It looks for `ffmpeg` on 
 - **creature/**, **character/**, **item/** and **models/** select actual archive path prefixes. **misc** selects other roots such as **world/**, **spells/** and **sound/**. Expand **Subfolders** only when you want to narrow the list.
 - **sound/** lists the installed Ogg, MP3 and WAV files with known paths. Click a row to play it. Search matches filenames, paths and file IDs. Folder, name, file ID and size sorting work across the continuous list; subfolders can narrow it to music, creatures or other audio groups. The player has play/pause, a seek bar and volume.
 - Model lists offer folder, name, file ID, skin count and size sorting. Click a sort button again to reverse it.
-- The table filter follows the selected folder: creature, item or character records. For other model folders it checks the known reference tables. Sounds have no model-table filter.
+- The table filter follows the selected folder: creature, item, character or sound records. For other model folders it checks the known reference tables. In **sound/**, choose **All installed**, **In sound tables** or **Not in sound tables**; sound references use the installed beta's `SoundKitEntry.FileDataID` records. The same status is shown in Info.
 - **Skins** shows clickable previews. **Info** exposes available names, file paths, model/display references, textures, animations, sounds and raw client records. Click a sound in **Info → Sound files** to play or pause it.
 - Only one sound plays at a time. Changing the selected file stops the previous sound. Animation starts paused and automatic rotation is opt-in.
 
@@ -117,6 +117,7 @@ Being present in the beta does not mean an asset is used in gameplay. A beta can
 - Creature references use `CreatureModelData.FileDataID`.
 - Item references follow `ItemDisplayInfo.ModelResourcesID` → `ModelFileData.ModelResourcesID` → `FileDataID`.
 - Character references follow `ChrModel.DisplayID` → `CreatureDisplayInfo.ModelID` → `CreatureModelData.FileDataID`.
+- Sound references use `SoundKitEntry.FileDataID`. A table reference never adds a sound absent from the beta's locally installed files.
 
 “Not in tables” means absent from the records the viewer can read. Unreadable encrypted sections cannot supply references. Mount records are exposed in Info; any additional filename-based classification is identified as inference.
 

@@ -6,7 +6,7 @@ export const modelRoots = ['creature/', 'character/', 'item/', 'models/'];
 export const miscRoots = ['character/', 'item/', 'world/', 'spells/', 'environments/', 'particles/', 'interface/', 'cameras/', 'models/', 'sound/', 'textures/', 'tileset/', 'dungeons/', 'dbfilesclient/', 'gametables/', 'fonts/', 'shaders/', 'shadertextures/', 'screeneffects/', 'xtextures/', 'unkmaps/', 'interiors/', 'items/', 'spell/', 'test/', 'qa_toolstest/', 'triallists/', 'users/', 'wtf/'];
 export const allRoots = [...new Set([...modelRoots, ...miscRoots])];
 export function referenceLabel(folder) {
-  return ({creature:'creature',character:'character',item:'item',models:'known'})[folder.split('/')[0]] || 'known';
+  return ({creature:'creature',character:'character',item:'item',models:'known',sound:'sound'})[folder.split('/')[0]] || 'known';
 }
 
 export function buildFolderTree(models) {
