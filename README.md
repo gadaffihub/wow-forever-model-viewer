@@ -71,7 +71,7 @@ open "WoW Models.app"
 
 Keep **WoW Models.app** in the project directory beside `server`, `public` and `node_modules`. It is a locally built launcher, not a standalone application bundle. It starts and stops its own local server, or connects to one already running on port 4317.
 
-Use **WoW Models → Choose WoW beta installation…** (**⌘O**) to choose the game folder. The app validates and saves your selection, then restarts its server. If the server was started separately in Terminal, restart that process yourself.
+Use **Settings (top-right gear) → Choose folder…**, or **WoW Models → Choose WoW beta installation…** (**⌘O**), to choose the game folder. The app validates and saves your selection, then restarts its server. If the server was started separately in Terminal, restart that process yourself. In the browser version, Settings accepts a manual installation path; save it, then restart the server to apply it.
 
 ### Audio on Safari and the macOS app
 
@@ -90,7 +90,19 @@ The viewer then converts Ogg to WAV locally in memory. It looks for `ffmpeg` on 
 - Model lists offer folder, name, file ID, skin count and size sorting. Click a sort button again to reverse it.
 - The table filter follows the selected folder: creature, item, character or sound records. For other model folders it checks the known reference tables. In **sound/**, choose **All installed**, **In sound tables** or **Not in sound tables**; sound references use the installed beta's `SoundKitEntry.FileDataID` records. The same status is shown in Info.
 - **Skins** shows clickable previews. **Info** exposes available names, file paths, model/display references, textures, animations, sounds and raw client records. Click a sound in **Info → Sound files** to play or pause it.
-- Only one sound plays at a time. Changing the selected file stops the previous sound. Animation starts paused and automatic rotation is opt-in.
+- Only one sound plays at a time. Changing the selected file stops the previous sound. Animation starts paused by default and automatic rotation is opt-in.
+
+### Settings
+
+The gear at the top-right opens saved viewer defaults:
+
+- **Autoplay animations:** start the selected animation when a model opens. Off by default.
+- **Autoplay sounds:** play the selected sound when opening it or navigating the sound list. On by default; turn it off to select files silently and use the player manually. Some browsers require an initial press of Play before allowing audio.
+- **Cycle skins automatically:** step through the current model's skins, with an adjustable interval of 1–60 seconds. Off by default. Manual skin selection restarts the interval; cycling stops while the page is hidden or when you leave the model.
+- **Startup folder:** reopen the last folder, choose a top-level archive folder, or use **Use current folder** to save a subfolder. This takes effect on the next launch.
+- **WoW installation:** choose the local game directory with the macOS folder picker or save a manual path in the browser.
+
+Playback and startup-folder preferences save automatically in local browser storage, separately from the installation path. They persist across launches in the same app or browser profile. The macOS app and a separate browser have their own viewer preferences.
 
 | Control | Action |
 | --- | --- |

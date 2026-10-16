@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {selectModels,modelRoots,miscRoots,allRoots,buildFolderTree,referenceLabel} from './catalog.mjs';
+import {normalizeSettings,startupFolder} from './settings.mjs';
 const $=id=>document.getElementById(id),num=n=>Number(n||0).toLocaleString();
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon=name=>`<svg><use href="#icon-${name}"/></svg>`;
 const appVersion=document.querySelector('meta[name="viewer-version"]').content;
 function saved(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 const preferences=saved('wow.preferences',{});
-const state={category:'all',folder:preferences.folder||'creature/',favoritesOnly:false,q:'',table:preferences.table||'all',sort:preferences.sort||'folder',direction:preferences.direction||'asc',catalog:[],revision:null,total:0,items:[],selected:null,index:-1,favorites:new Set(saved('wilds.favorites',[])),info:null,model:null,appearance:0,loading:false};
+let settings=normalizeSettings(saved('wow.settings',{})),skinTimer=null;
+const state={category:'all',folder:startupFolder(settings,preferences.folder),favoritesOnly:false,q:'',table:preferences.table||'all',sort:preferences.sort||'folder',direction:preferences.direction||'asc',catalog:[],revision:null,total:0,items:[],selected:null,index:-1,favorites:new Set(saved('wilds.favorites',[])),info:null,model:null,appearance:0,loading:false};
 let folders=buildFolderTree([]);const expandedFolders=new Set();
 let sounds=null,soundLibraryRequest,soundSkippedRecords=0;
 const soundMode=()=>state.folder.startsWith('sound/');
@@ -48,7 +50,7 @@ function filterCatalog({preferred=state.selected,resetScroll=false}={}){
  if(resetScroll)$('results').scrollTop=0;renderList();
  if(!state.items.length){clearSelection();return;}
  const index=state.index>=0?state.index:0,model=state.items[index];
- if(model.id!==state.selected||!state.model)loadModel(model.id,index);else{state.index=index;highlightSelection();}
+ if(model.id!==state.selected||(!state.model&&model.type!=='sound'))loadModel(model.id,index);else{state.index=index;highlightSelection();}
 }
 function syncFilters(){
  const audio=soundMode();document.querySelector('[data-sort="skins"]').hidden=audio;
@@ -68,7 +70,7 @@ function syncFilters(){
 function changeFilter(){
  localStorage.setItem('wow.preferences',JSON.stringify({folder:state.folder,table:state.table,sort:state.sort,direction:state.direction}));syncFilters();filterCatalog({resetScroll:true});
 }
-function next(direction){const index=state.index<0?0:state.index+direction;if(index>=0&&index<state.items.length)loadModel(state.items[index].id,index,{autoplay:true});}
+function next(direction){const index=state.index<0?0:state.index+direction;if(index>=0&&index<state.items.length)loadModel(state.items[index].id,index);}
 function chooseRoot(path){
  if(!allRoots.includes(path))return;
  state.folder=path;
@@ -94,14 +96,15 @@ const ring=new THREE.Mesh(new THREE.RingGeometry(2.8,2.81,96),new THREE.MeshBasi
 let root=null,meshes=[],boneNodes=[],boneMatrices=[],clip=null,elapsed=0,playing=false,dimensions=null,resources=[];
 const trackV=new THREE.Vector3(),trackQ=new THREE.Quaternion(),trackS=new THREE.Vector3(),pivotV=new THREE.Vector3(),scratchM=new THREE.Matrix4(),negativePivot=new THREE.Matrix4();
 const textureLoader=new THREE.TextureLoader();let texturePromises=new Map();
-function disposeModel(){if(root)scene.remove(root);for(const r of resources)r.dispose?.();resources=[];root=null;meshes=[];boneNodes=[];boneMatrices=[];clip=null;elapsed=0;texturePromises=new Map();}
+function disposeModel(){stopSkinCycle();if(root)scene.remove(root);for(const r of resources)r.dispose?.();resources=[];root=null;meshes=[];boneNodes=[];boneMatrices=[];clip=null;elapsed=0;texturePromises=new Map();}
 function resize(){const r=$('viewport').getBoundingClientRect();renderer.setSize(r.width,r.height);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();}new ResizeObserver(resize).observe($('viewport'));
 function fitCamera(){if(!root)return;const box=new THREE.Box3().setFromObject(root,true),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());const radius=Math.max(size.length()/2,.25);const distance=radius/Math.sin(THREE.MathUtils.degToRad(camera.fov/2))/Math.min(1,camera.aspect)*1.14;camera.position.copy(center).add(new THREE.Vector3(1,.36,1.2).normalize().multiplyScalar(distance));controls.target.copy(center);camera.near=Math.max(.001,radius/200);camera.far=Math.max(1000,radius*100);camera.updateProjectionMatrix();controls.maxDistance=distance*15;controls.minDistance=radius*.15;controls.update();}
 async function getTexture(id,token){if(!id)return null;if(texturePromises.has(id))return texturePromises.get(id);const p=textureLoader.loadAsync(`/api/texture/${id}.png`).then(t=>{if(token!==modelToken){t.dispose();return null;}t.colorSpace=THREE.SRGBColorSpace;t.flipY=false;t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());resources.push(t);return t;}).catch(()=>null);texturePromises.set(id,p);return p;}
 async function applyAppearance(index){
+ stopSkinCycle();
  state.appearance=index;const m=state.model;if(!m)return;const token=modelToken,appearance=m.appearances[index];$('appearances').querySelectorAll('.appearance').forEach((b,i)=>{b.classList.toggle('selected',i===index);b.setAttribute('aria-pressed',String(i===index));});const label=$('appearance-name');if(label)label.textContent=appearance?.label||'Original model textures';
  let missing=0;await Promise.all(meshes.map(async(mesh,i)=>{const slot=m.groups[i].texture,entry=m.textures[slot];if(!entry)return;let id=entry.id;if(entry.type>=11&&entry.type<=14)id=appearance?.textures[entry.type-11]||id;const t=await getTexture(id,token);if(token!==modelToken||index!==state.appearance)return;if(!t&&id)missing++;mesh.material.map=t;mesh.material.color.set(t?0xffffff:0x9eaa93);mesh.material.needsUpdate=true;}));
- if(token===modelToken){const unresolved=m.textures.filter(t=>t.type!==0&&!t.id&&!(t.type>=11&&t.type<=14&&appearance?.textures[t.type-11])).length;const notes=[...m.warnings];if(missing)notes.push(`${missing} texture slots could not be loaded locally.`);if(unresolved)notes.push(`${unresolved} replaceable texture slots have no mapped appearance. Shown in neutral material.`);$('model-warnings').textContent=notes.join(' ');}
+ if(token===modelToken&&index===state.appearance){const unresolved=m.textures.filter(t=>t.type!==0&&!t.id&&!(t.type>=11&&t.type<=14&&appearance?.textures[t.type-11])).length;const notes=[...m.warnings];if(missing)notes.push(`${missing} texture slots could not be loaded locally.`);if(unresolved)notes.push(`${unresolved} replaceable texture slots have no mapped appearance. Shown in neutral material.`);$('model-warnings').textContent=notes.join(' ');scheduleSkinCycle();}
 }
 function buildMesh(m){
  root=new THREE.Group();scene.add(root);const base=new THREE.BufferGeometry();base.setAttribute('position',new THREE.Float32BufferAttribute(m.positions,3));if(m.normals.length===m.positions.length)base.setAttribute('normal',new THREE.Float32BufferAttribute(m.normals,3));if(m.uv.length===m.positions.length/3*2)base.setAttribute('uv',new THREE.Float32BufferAttribute(m.uv,2));
@@ -110,7 +113,7 @@ function buildMesh(m){
  const box=new THREE.Box3().setFromObject(root,true),size=box.getSize(new THREE.Vector3());dimensions=size;const scale=4/Math.max(size.x,size.y,size.z,.001);root.scale.setScalar(scale);root.position.set(-(box.min.x+size.x/2)*scale,-box.min.y*scale,-(box.min.z+size.z/2)*scale);fitCamera();renderer.render(scene,camera);
 
 }
-async function loadModel(id,index,{autoplay=false}={}){
+async function loadModel(id,index,{autoplay=settings.autoplaySounds}={}){
  if(state.items[index]?.type==='sound'){loadSound(id,index,autoplay);return;}
  soundPlayer.controls=false;soundPlayer.remove();
  stopSound();
@@ -119,14 +122,14 @@ async function loadModel(id,index,{autoplay=false}={}){
  $('animation').innerHTML='<option value="-1">Bind pose</option>'+m.animations.map((a,i)=>`<option value="${i}">${esc(a.name)}</option>`).join('');await applyAppearance(0);if(token!==modelToken)return;$('stage-message').classList.add('hidden');const idle=m.animations.findIndex(a=>a.id===0);const first=idle>=0?idle:m.animations.length?0:-1;$('animation').value=String(first);if(first>=0)await loadAnimation(first);if(token!==modelToken)return;fitCamera();generateSkinPreviews(m,token).catch(e=>{if(token===modelToken)$('model-warnings').textContent='Skin previews: '+e.message;});localStorage.setItem('wilds.lastModel',String(id));$('results').querySelector('.selected')?.scrollIntoView({block:'nearest'});
  }catch(e){if(e.name==='AbortError'||token!==modelToken)return;state.loading=false;if(e.code==='OUTSIDE_CATALOG'){await fetchCatalog();return;}message('This model couldn’t be opened',e.message+' Use → to continue exploring.');$('model-warnings').textContent=e.message;}
 }
-async function loadAnimation(index){const token=++animationToken,mt=modelToken;clip=null;elapsed=0;for(const bone of boneNodes)bone.matrixWorld.identity();if(index<0){$('animation-note').textContent='';return;}$('animation-note').textContent='Reading animation tracks…';try{const data=await api(`/api/animation/${state.selected}/${index}`);if(token!==animationToken||mt!==modelToken)return;clip=data;playing=false;animateBones(0);renderer.render(scene,camera);updatePlay();$('animation-note').textContent='';}catch(e){if(token===animationToken&&mt===modelToken)$('animation-note').textContent=e.message;}}
+async function loadAnimation(index){const token=++animationToken,mt=modelToken;clip=null;elapsed=0;playing=false;updatePlay();for(const bone of boneNodes)bone.matrixWorld.identity();if(index<0){$('animation-note').textContent='';return;}$('animation-note').textContent='Reading animation tracks…';try{const data=await api(`/api/animation/${state.selected}/${index}`);if(token!==animationToken||mt!==modelToken)return;clip=data;playing=settings.autoplayAnimations;animateBones(0);renderer.render(scene,camera);updatePlay();$('animation-note').textContent='';}catch(e){if(token===animationToken&&mt===modelToken)$('animation-note').textContent=e.message;}}
 function updatePlay(){$('play').innerHTML=icon(playing?'pause':'play');$('play').setAttribute('aria-label',playing?'Pause animation':'Play animation');}
 function sample(t,time,kind){const fallback=kind==='scale'?[1,1,1]:kind==='rotation'?[0,0,0,1]:[0,0,0];if(!t?.times?.length||!t.values?.length)return fallback;if(t.globalDuration)time%=t.globalDuration;const times=t.times,values=t.values;let lo=0,hi=Math.min(times.length,values.length)-1;if(time<=times[0])return values[0];if(time>=times[hi])return values[hi];while(hi-lo>1){const mid=(lo+hi)>>1;if(times[mid]<=time)lo=mid;else hi=mid;}if(t.interpolation===0)return values[lo];const f=(time-times[lo])/Math.max(1,times[hi]-times[lo]);if(kind==='rotation'){trackQ.fromArray(values[lo]).normalize();return trackQ.slerp(new THREE.Quaternion().fromArray(values[hi]).normalize(),f).toArray();}return values[lo].map((v,i)=>v+(values[hi][i]-v)*f);}
 function animateBones(time){const m=state.model;if(!m||!clip)return;const done=new Uint8Array(m.bones.length);function update(i){if(done[i])return;done[i]=1;const bone=m.bones[i],tracks=clip.bones[i],parent=bone.parent;if(parent>=0&&parent<m.bones.length&&parent!==i)update(parent);const translation=sample(tracks?.translation,time,'translation'),rotation=sample(tracks?.rotation,time,'rotation'),scale=sample(tracks?.scale,time,'scale');trackV.fromArray(translation).add(pivotV.fromArray(bone.pivot));trackQ.fromArray(rotation).normalize();trackS.fromArray(scale);const mat=boneMatrices[i];mat.compose(trackV,trackQ,trackS);negativePivot.makeTranslation(-bone.pivot[0],-bone.pivot[1],-bone.pivot[2]);mat.multiply(negativePivot);if(parent>=0&&parent<m.bones.length&&parent!==i)mat.premultiply(boneMatrices[parent]);boneNodes[i].matrixWorld.copy(mat);}for(let i=0;i<m.bones.length;i++)update(i);}
 let lastTime=performance.now(),lastUI=0;renderer.setAnimationLoop(time=>{const delta=Math.min((time-lastTime)/1000,.1);lastTime=time;if(clip){if(playing)elapsed=(elapsed+delta*Number($('speed').value))%Math.max(.001,clip.duration/1000);if(playing)animateBones(elapsed*1000);if(time-lastUI>100){$('timeline').value=String(elapsed/(clip.duration/1000||1));$('time-label').textContent=`${elapsed.toFixed(2)} / ${(clip.duration/1000).toFixed(2)} s`;lastUI=time;}}if(root&&$('rotate').checked)root.rotation.y+=delta*.23;controls.update();renderer.render(scene,camera);});
 
-$('results').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b)loadModel(Number(b.dataset.id),Number(b.dataset.index),{autoplay:true});});$('folder-buttons').onclick=event=>{const button=event.target.closest('[data-root]');if(button)chooseRoot(button.dataset.root);};$('folder-tree').onclick=event=>{const expand=event.target.closest('[data-expand]');if(expand){const path=expand.dataset.expand;expandedFolders.has(path)?expandedFolders.delete(path):expandedFolders.add(path);renderFolderTree();return;}const button=event.target.closest('[data-folder]');if(button){state.folder=button.dataset.folder;changeFilter();}};$('only-favorites').onclick=()=>{state.favoritesOnly=!state.favoritesOnly;changeFilter();};let searchTimer;$('search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=$('search').value;changeFilter();},180);};document.querySelectorAll('[data-sort]').forEach(button=>button.onclick=()=>{const sort=button.dataset.sort;state.direction=state.sort===sort?(state.direction==='asc'?'desc':'asc'):(['folder','name'].includes(sort)?'asc':'desc');state.sort=sort;document.querySelectorAll('[data-sort]').forEach(b=>{const label={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size'}[b.dataset.sort];b.classList.toggle('active',b===button);b.textContent=label+(b===button?(state.direction==='asc'?' ↑':' ↓'):'');});changeFilter();});$('table-filter').onchange=()=>{state.table=$('table-filter').value;changeFilter();};$('prev-model').onclick=()=>next(-1);$('next-model').onclick=()=>next(1);$('favorite').onclick=favorite;$('reset-camera').onclick=()=>{if(root)root.rotation.y=0;fitCamera();};$('appearances').onclick=e=>{const b=e.target.closest('[data-appearance]');if(b)applyAppearance(Number(b.dataset.appearance));};$('animation').onchange=()=>loadAnimation(Number($('animation').value));$('play').onclick=()=>{playing=!playing;updatePlay();};$('timeline').oninput=()=>{if(clip)elapsed=Number($('timeline').value)*clip.duration/1000;};$('wireframe').onchange=()=>meshes.forEach(m=>m.material.wireframe=$('wireframe').checked);document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{scene.background.set(b.dataset.bg);document.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('selected',x===b));});
-$('snapshot').onclick=()=>{if(!state.model)return;renderer.render(scene,camera);renderer.domElement.toBlob(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wow-${state.selected}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Screenshot saved');},'image/png');};window.addEventListener('keydown',e=>{if(e.target.closest('input,select,textarea,audio,[contenteditable]')||e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextSkin(1):next(1);}else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?nextSkin(-1):next(-1);}else if(e.code==='Space'){e.preventDefault();if(soundMode()){if(state.selected)playSound(state.selected);}else{playing=!playing;updatePlay();}}else if(e.key.toLowerCase()==='f')favorite();else if(e.key==='0'){$('reset-camera').click();}else if(e.key==='/'){e.preventDefault();$('search').focus();}});
+$('results').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(b)loadModel(Number(b.dataset.id),Number(b.dataset.index));});$('folder-buttons').onclick=event=>{const button=event.target.closest('[data-root]');if(button)chooseRoot(button.dataset.root);};$('folder-tree').onclick=event=>{const expand=event.target.closest('[data-expand]');if(expand){const path=expand.dataset.expand;expandedFolders.has(path)?expandedFolders.delete(path):expandedFolders.add(path);renderFolderTree();return;}const button=event.target.closest('[data-folder]');if(button){state.folder=button.dataset.folder;changeFilter();}};$('only-favorites').onclick=()=>{state.favoritesOnly=!state.favoritesOnly;changeFilter();};let searchTimer;$('search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{state.q=$('search').value;changeFilter();},180);};document.querySelectorAll('[data-sort]').forEach(button=>button.onclick=()=>{const sort=button.dataset.sort;state.direction=state.sort===sort?(state.direction==='asc'?'desc':'asc'):(['folder','name'].includes(sort)?'asc':'desc');state.sort=sort;document.querySelectorAll('[data-sort]').forEach(b=>{const label={folder:'Folder',name:'Name',id:'File ID',skins:'Skins',size:'Size'}[b.dataset.sort];b.classList.toggle('active',b===button);b.textContent=label+(b===button?(state.direction==='asc'?' ↑':' ↓'):'');});changeFilter();});$('table-filter').onchange=()=>{state.table=$('table-filter').value;changeFilter();};$('prev-model').onclick=()=>next(-1);$('next-model').onclick=()=>next(1);$('favorite').onclick=favorite;$('reset-camera').onclick=()=>{if(root)root.rotation.y=0;fitCamera();};$('appearances').onclick=e=>{const b=e.target.closest('[data-appearance]');if(b)applyAppearance(Number(b.dataset.appearance));};$('animation').onchange=()=>loadAnimation(Number($('animation').value));$('play').onclick=()=>{playing=!playing;updatePlay();};$('timeline').oninput=()=>{if(clip)elapsed=Number($('timeline').value)*clip.duration/1000;};$('wireframe').onchange=()=>meshes.forEach(m=>m.material.wireframe=$('wireframe').checked);document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{scene.background.set(b.dataset.bg);document.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('selected',x===b));});
+$('snapshot').onclick=()=>{if(!state.model)return;renderer.render(scene,camera);renderer.domElement.toBlob(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wow-${state.selected}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast('Screenshot saved');},'image/png');};window.addEventListener('keydown',e=>{if(!$('settings-panel').hidden||e.target.closest('input,select,textarea,audio,[contenteditable]')||e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowRight'){e.preventDefault();e.shiftKey?nextSkin(1):next(1);}else if(e.key==='ArrowLeft'){e.preventDefault();e.shiftKey?nextSkin(-1):next(-1);}else if(e.code==='Space'){e.preventDefault();if(soundMode()){if(state.selected)playSound(state.selected);}else{playing=!playing;updatePlay();}}else if(e.key.toLowerCase()==='f')favorite();else if(e.key==='0'){$('reset-camera').click();}else if(e.key==='/'){e.preventDefault();$('search').focus();}});
 let initialized=false,polling=false;
 async function fetchCatalog(){
  const snapshot=await api('/api/catalog');
@@ -154,7 +157,13 @@ function skinLabel(label,modelName){
  s=s.replace(/([a-z])(Black|White|Brown|Blue|Green|Red|Grey|Gray|Gold|Alpha)/g,'$1 $2').replace(/(reddish|dark|light|arctic|blue)(brown|grey|gray|alpha|blue|green|red)/gi,'$1 $2').replaceAll('_',' ').trim();
  return (s||label).replace(/\b\w/g,c=>c.toUpperCase());
 }
-function nextSkin(direction){const count=state.model?.appearances.length||0;if(!count)return;applyAppearance((state.appearance+direction+count)%count);}
+function nextSkin(direction){const count=state.model?.appearances.length||0;if(!count)return;return applyAppearance((state.appearance+direction+count)%count);}
+function stopSkinCycle(){clearTimeout(skinTimer);skinTimer=null;}
+function scheduleSkinCycle(){
+ stopSkinCycle();if(!settings.cycleSkins||document.hidden||(state.model?.appearances.length||0)<2)return;
+ const token=modelToken;skinTimer=setTimeout(()=>{if(token===modelToken&&settings.cycleSkins&&!document.hidden)nextSkin(1);},settings.skinInterval*1000);
+}
+document.addEventListener('visibilitychange',scheduleSkinCycle);
 $('skin-prev').onclick=()=>nextSkin(-1);$('skin-next').onclick=()=>nextSkin(1);
 let previewRenderer;
 async function generateSkinPreviews(m,token){
@@ -195,6 +204,7 @@ async function playSound(id){
  try{await soundPlayer.play();if(token===soundToken)updateSoundButtons();}
  catch(error){
    if(token!==soundToken||error.name==='AbortError')return;
+   if(error.name==='NotAllowedError'){toast('Press Play to start audio.');return;}
    let reason='This sound could not be played.';
    try{const response=await fetch(soundURL(id));if(!response.ok)reason=(await response.json()).error||reason;}catch{}
    if(token===soundToken){soundPlayer.pause();updateSoundButtons();toast(reason);}
@@ -266,3 +276,45 @@ function loadSound(id,index,autoplay){
  document.querySelector('[data-panel="info"]').click();
  if(autoplay)playSound(id);
 }
+
+function saveViewerSettings(){
+ settings=normalizeSettings(settings);localStorage.setItem('wow.settings',JSON.stringify(settings));
+}
+function renderStartupFolders(){
+ const choices=[['last','Last opened folder'],...allRoots.map(path=>[path,path])];
+ if(settings.startupFolder!=='last'&&!allRoots.includes(settings.startupFolder))choices.push([settings.startupFolder,settings.startupFolder]);
+ $('startup-folder').innerHTML=choices.map(([value,label])=>`<option value="${esc(value)}">${esc(label)}</option>`).join('');$('startup-folder').value=settings.startupFolder;
+}
+function closeSettings(){
+ $('settings-panel').hidden=true;$('settings-button').setAttribute('aria-expanded','false');
+}
+async function openSettings(){
+ closeMisc();$('settings-panel').hidden=false;$('settings-button').setAttribute('aria-expanded','true');$('settings-status').textContent='';
+ $('autoplay-animations').checked=settings.autoplayAnimations;$('autoplay-sounds').checked=settings.autoplaySounds;$('cycle-skins').checked=settings.cycleSkins;
+ $('skin-interval').value=settings.skinInterval;$('skin-interval').disabled=!settings.cycleSkins;renderStartupFolders();
+ const native=!!window.webkit?.messageHandlers?.chooseInstallation;$('choose-installation').hidden=!native;$('installation-form').hidden=native;
+ $('installation-path').textContent=state.info?.build.path||'No installation selected';$('installation-input').value=state.info?.build.path||'';
+ $('settings-close').focus();
+ try{const installation=await api('/api/installation');$('installation-path').textContent=installation.path||'No installation selected';if(document.activeElement!==$('installation-input'))$('installation-input').value=installation.path;}
+ catch(error){$('settings-status').textContent=error.message;}
+}
+$('settings-button').onclick=()=>{$('settings-panel').hidden?openSettings():closeSettings();};
+$('settings-close').onclick=()=>{closeSettings();$('settings-button').focus();};
+document.addEventListener('click',event=>{if(!event.target.closest('#settings-panel,#settings-button'))closeSettings();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('settings-panel').hidden){event.preventDefault();closeSettings();$('settings-button').focus();}});
+$('autoplay-animations').onchange=()=>{settings.autoplayAnimations=$('autoplay-animations').checked;saveViewerSettings();playing=!!clip&&settings.autoplayAnimations;updatePlay();};
+$('autoplay-sounds').onchange=()=>{settings.autoplaySounds=$('autoplay-sounds').checked;saveViewerSettings();if(!settings.autoplaySounds){++soundToken;soundPlayer.pause();}else if(soundMode()&&state.selected&&soundPlayer.paused)playSound(state.selected);};
+$('cycle-skins').onchange=()=>{settings.cycleSkins=$('cycle-skins').checked;saveViewerSettings();$('skin-interval').disabled=!settings.cycleSkins;scheduleSkinCycle();};
+$('skin-interval').onchange=()=>{settings.skinInterval=$('skin-interval').valueAsNumber;saveViewerSettings();$('skin-interval').value=settings.skinInterval;scheduleSkinCycle();};
+$('startup-folder').onchange=()=>{settings.startupFolder=$('startup-folder').value;saveViewerSettings();};
+$('use-current-folder').onclick=()=>{settings.startupFolder=state.folder;saveViewerSettings();renderStartupFolders();};
+$('choose-installation').onclick=()=>{closeSettings();window.webkit?.messageHandlers?.chooseInstallation.postMessage(null);};
+$('installation-form').onsubmit=async event=>{
+ event.preventDefault();const button=$('installation-form').querySelector('button');button.disabled=true;$('settings-status').textContent='Checking installation…';
+ try{
+   const response=await fetch('/api/installation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:$('installation-input').value})});
+   const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not save installation.');
+   $('installation-input').value=result.path;
+   $('settings-status').textContent=result.overridden?'Saved. Restart without --wow-path or WOW_PATH to use this folder.':result.restartRequired?'Saved. Restart the viewer server to use this folder.':'Installation saved.';
+ }catch(error){$('settings-status').textContent=error.message;}finally{button.disabled=false;}
+};

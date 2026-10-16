@@ -1,7 +1,7 @@
 import Cocoa
 @preconcurrency import WebKit
 
-final class Viewer: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDownloadDelegate {
+final class Viewer: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDownloadDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var webView: WKWebView!
     var process: Process?
@@ -24,7 +24,10 @@ final class Viewer: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDow
         editItem.submenu = editMenu; NSApp.mainMenu = menu
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1380, height: 920), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "WoW Models"; window.backgroundColor = .black; window.minSize = NSSize(width: 900, height: 600)
-        webView = WKWebView(frame: window.contentView!.bounds); webView.autoresizingMask = [.width, .height]; webView.navigationDelegate = self
+        let configuration = WKWebViewConfiguration()
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.userContentController.add(self, name: "chooseInstallation")
+        webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration); webView.autoresizingMask = [.width, .height]; webView.navigationDelegate = self
         window.contentView!.addSubview(webView); window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         connect()
     }
@@ -77,6 +80,12 @@ final class Viewer: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDow
             }
             do { try task.run() } catch { self.showError(error.localizedDescription) }
         }
+    }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "chooseInstallation", message.frameInfo.isMainFrame,
+              let url = message.frameInfo.request.url,
+              url.scheme == serverURL.scheme, url.host == serverURL.host, url.port == serverURL.port else { return }
+        chooseInstallation()
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)

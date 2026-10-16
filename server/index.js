@@ -12,6 +12,8 @@ const {parseM2, parseWMO, animation} = require('./models');
 const {decodeBLP, png} = require('./blp');
 const {createAudioReader, sendAudio} = require('./audio');
 const {loadSoundIndex} = require('./sounds');
+const {configureInstallation} = require('./installation-http');
+const {readSettings} = require('./installation');
 const {values: options} = parseArgs({options: {'wow-path': {type: 'string'}, port: {type: 'string'}, help: {type: 'boolean'}}});
 if (options.help) {console.log('npm start -- [--wow-path "/path/to/World of Warcraft"] [--port 4317]');process.exit(0);}
 const PORT = Number(options.port || process.env.PORT || 4317);
@@ -25,7 +27,7 @@ const staticFiles = new Map();
 
 async function loadAssets() {
   const digest = crypto.createHash('sha256');
-  for (const name of ['index.html', 'app.js', 'style.css', 'catalog.mjs']) {
+  for (const name of ['index.html', 'app.js', 'style.css', 'catalog.mjs', 'settings.mjs']) {
     const data = await fs.readFile(path.join(ROOT, 'public', name));
     staticFiles.set('/' + name, data);digest.update(data);
   }
@@ -65,9 +67,14 @@ function send(req, res, status, data, type = 'application/json') {
 const mime = {'.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8'};
 const server = http.createServer(async (req, res) => {
   try {
-    if (!['GET', 'HEAD'].includes(req.method)) return send(req, res, 405, {error: 'Read-only service'});
     if (!['127.0.0.1', 'localhost', '[::1]'].includes((req.headers.host || '').replace(/:\d+$/, ''))) return send(req, res, 403, {error: 'Local connections only'});
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`), route = url.pathname;
+    if (req.method === 'POST' && route === '/api/installation') {
+      const installation = await configureInstallation(req);
+      return send(req, res, 200, {path: installation.path, version: installation.version, restartRequired: installation.path !== archive.build?.path, overridden: !!(options['wow-path'] || process.env.WOW_PATH)});
+    }
+    if (!['GET', 'HEAD'].includes(req.method)) return send(req, res, 405, {error: 'Unsupported method'});
+    if (route === '/api/installation') return send(req, res, 200, {path: archive.build?.path || (await readSettings()).wowPath || '', version: archive.build?.version});
     if (route === '/api/status') return send(req, res, 200, {appVersion, ...(initError ? {phase: 'error', error: initError.message, code: initError.code} : catalog ? catalog.status() : archive.status)});
     if (route.startsWith('/api/')) {
       if (!catalog) return send(req, res, 503, {error: initError?.message || 'Opening the beta catalog.'});
@@ -103,7 +110,7 @@ const server = http.createServer(async (req, res) => {
     return send(req, res, 404, {error: 'Not found'});
   } catch (error) {
     console.error(req.url, error.message);
-    send(req, res, error.code === 'ENOENT' ? 404 : 422, {error: error.message, code: error.code});
+    send(req, res, error.status || (error.code === 'ENOENT' ? 404 : 422), {error: error.message, code: error.code});
   }
 });
 (async () => {
